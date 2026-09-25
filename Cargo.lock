@@ -142,9 +142,15 @@ dependencies = [
 name = "quint"
 version = "0.1.0"
 dependencies = [
+ "quint_css",
  "quint_html",
  "quint_net",
+ "quint_style",
 ]
+
+[[package]]
+name = "quint_css"
+version = "0.1.0"
 
 [[package]]
 name = "quint_html"
@@ -156,6 +162,14 @@ version = "0.1.0"
 dependencies = [
  "thiserror",
  "ureq",
+]
+
+[[package]]
+name = "quint_style"
+version = "0.1.0"
+dependencies = [
+ "quint_css",
+ "quint_html",
 ]
 
 [[package]]

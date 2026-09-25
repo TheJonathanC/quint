@@ -10,3 +10,5 @@ edition = "2024"
 [dependencies]
 quint_html = { path = "crates/quint_html" }
 quint_net = { path = "crates/quint_net" }
+quint_css = { path = "crates/quint_css" }
+quint_style = { path = "crates/quint_style" }
