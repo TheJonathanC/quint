@@ -1,0 +1,8 @@
+[package]
+name = "quint_net"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ureq = "3"
+thiserror = "2"
