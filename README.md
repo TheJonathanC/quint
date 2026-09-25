@@ -13,6 +13,7 @@ Quint is organized into a Cargo workspace with the following modular engine comp
 - **`quint_style`**: A style resolution engine that cross-references the DOM tree with CSS rules, applying selector matching, the cascade, specificity sorting, and inheritance.
 - **`quint_layout`**: A CSS block layout engine that computes the physical box model (`x`, `y`, `width`, `height`, margins, paddings, and borders) for every element in the document.
 - **`quint_render`**: A CPU-based rendering engine using `winit` for cross-platform windowing, `tiny-skia` for 2D graphics (rectangles, color fills), and `font8x8` for basic bitmap text rasterization.
+- **`quint_js`**: A JavaScript bridge integrating the `boa` engine. Extracts `<script>` tags, exposes a global `document` API (`createElement`, `getElementById`, `appendChild`), and allows scripts to dynamically mutate the Rust DOM tree.
 
 ## Usage
 
@@ -22,11 +23,8 @@ You can use the CLI to fetch real web pages or parse raw HTML strings. By defaul
 # Fetch, layout, and render a live URL (default 800px viewport)
 cargo run -- https://example.com
 
-# Render with a custom viewport width
-cargo run -- --width 1024 https://example.com
-
-# Parse a raw HTML string and render it directly
-cargo run -- --html '<style>body { background: blue; } p { color: white; }</style><body><p>Hello, Quint!</p></body>'
+# Parse a raw HTML string and render it directly (now with JS support!)
+cargo run -- --html '<script>document.body.setAttribute("class", "red");</script><body><p>Hello, Quint!</p></body>'
 ```
 
 ### Advanced Diagnostics
@@ -40,7 +38,7 @@ cargo run -- --layout https://example.com
 # Output the styled DOM tree (CSS resolution applied, but no layout geometry)
 cargo run -- --styled https://example.com
 
-# Output the raw DOM tree (HTML parsing only, no CSS or layout)
+# Output the raw DOM tree (HTML parsing, plus executed JS modifications)
 cargo run -- --dom-only https://example.com
 ```
 
