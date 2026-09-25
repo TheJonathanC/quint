@@ -145,4 +145,14 @@ mod tests {
             "url(http://example.com/img.png)"
         );
     }
+
+    #[test]
+    fn parse_pseudo_class_selectors() {
+        let ss = parse("a:link, a:visited { color: #348; }");
+        assert_eq!(ss.rules.len(), 1);
+        assert_eq!(ss.rules[0].selectors.len(), 2);
+        assert_eq!(ss.rules[0].selectors[0].tag, Some("a".into()));
+        assert_eq!(ss.rules[0].selectors[1].tag, Some("a".into()));
+        assert_eq!(ss.rules[0].declarations[0].value, "#348");
+    }
 }

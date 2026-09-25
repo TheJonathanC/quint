@@ -5,6 +5,16 @@ pub fn parse(input: &str) -> Vec<Node> {
     parse_nodes(&mut chars)
 }
 
+const VOID_ELEMENTS: &[&str] = &[
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
+    "track", "wbr",
+];
+
+fn is_void_element(tag: &str) -> bool {
+    let lower = tag.to_ascii_lowercase();
+    VOID_ELEMENTS.contains(&lower.as_str())
+}
+
 fn parse_nodes(chars: &mut std::iter::Peekable<std::str::Chars>) -> Vec<Node> {
     let mut nodes = Vec::new();
 
@@ -19,6 +29,41 @@ fn parse_nodes(chars: &mut std::iter::Peekable<std::str::Chars>) -> Vec<Node> {
             lookahead.next(); // consume '<'
             if lookahead.peek() == Some(&'/') {
                 break; // Closing tag — let the parent handle it
+            }
+            if lookahead.peek() == Some(&'!') {
+                // Doctype or comment
+                chars.next(); // consume '<'
+                chars.next(); // consume '!'
+                if chars.peek() == Some(&'-') {
+                    let mut check = chars.clone();
+                    check.next();
+                    if check.peek() == Some(&'-') {
+                        // Skip HTML comment <!-- ... -->
+                        chars.next(); // consume '-'
+                        chars.next(); // consume '-'
+                        loop {
+                            match chars.next() {
+                                Some('-') if chars.peek() == Some(&'-') => {
+                                    chars.next();
+                                    if chars.peek() == Some(&'>') {
+                                        chars.next();
+                                        break;
+                                    }
+                                }
+                                Some(_) => continue,
+                                None => break,
+                            }
+                        }
+                        continue;
+                    }
+                }
+                // Skip <!DOCTYPE ...> or other declarations until '>'
+                while let Some(c) = chars.next() {
+                    if c == '>' {
+                        break;
+                    }
+                }
+                continue;
             }
             if let Some(node) = parse_element(chars) {
                 nodes.push(node);
@@ -37,8 +82,8 @@ fn parse_element(chars: &mut std::iter::Peekable<std::str::Chars>) -> Option<Nod
     let attributes = parse_attributes(chars);
 
     skip_whitespace(chars);
-    let self_closing = chars.peek() == Some(&'/');
-    if self_closing {
+    let self_closing = chars.peek() == Some(&'/') || is_void_element(&tag);
+    if chars.peek() == Some(&'/') {
         chars.next();
     }
 
@@ -221,5 +266,34 @@ mod tests {
         let nodes = parse("just text");
         assert_eq!(nodes.len(), 1);
         assert!(matches!(&nodes[0], Node::Text(t) if t == "just text"));
+    }
+
+    #[test]
+    fn parse_doctype_and_void_elements() {
+        let nodes = parse("<!doctype html><link rel=\"icon\" href=\"data:,\"><p>hi</p>");
+        assert_eq!(nodes.len(), 2);
+        match &nodes[0] {
+            Node::Element { tag, children, .. } => {
+                assert_eq!(tag, "link");
+                assert!(children.is_empty());
+            }
+            _ => panic!("expected link element"),
+        }
+        match &nodes[1] {
+            Node::Element { tag, .. } => {
+                assert_eq!(tag, "p");
+            }
+            _ => panic!("expected p element"),
+        }
+    }
+
+    #[test]
+    fn parse_comments() {
+        let nodes = parse("<!-- comment --><h1>title</h1>");
+        assert_eq!(nodes.len(), 1);
+        match &nodes[0] {
+            Node::Element { tag, .. } => assert_eq!(tag, "h1"),
+            _ => panic!("expected h1 element"),
+        }
     }
 }

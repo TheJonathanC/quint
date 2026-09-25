@@ -44,6 +44,7 @@ fn paint_box(layout_box: &LayoutBox, pixmap: &mut Pixmap) {
             text,
             layout_box.dimensions.content.x,
             layout_box.dimensions.content.y,
+            layout_box.dimensions.content.width,
             color,
         );
     }
@@ -53,43 +54,70 @@ fn paint_box(layout_box: &LayoutBox, pixmap: &mut Pixmap) {
     }
 }
 
-fn draw_text(pixmap: &mut Pixmap, text: &str, start_x: f32, start_y: f32, color: Color) {
+fn draw_text(
+    pixmap: &mut Pixmap,
+    text: &str,
+    start_x: f32,
+    start_y: f32,
+    max_box_width: f32,
+    color: Color,
+) {
     let scale = 2.0;
+    let char_width = 8.0 * scale;
+    let line_height = 20.0;
+    let max_x = if max_box_width > 0.0 {
+        (start_x + max_box_width).min(pixmap.width() as f32)
+    } else {
+        pixmap.width() as f32
+    };
+
     let mut cursor_x = start_x;
-    let cursor_y = start_y;
+    let mut cursor_y = start_y;
 
     let mut paint = Paint::default();
     paint.set_color(color);
 
-    let max_x = pixmap.width() as f32;
+    let words: Vec<&str> = text.split_whitespace().collect();
+    for (i, word) in words.iter().enumerate() {
+        let word_width = word.chars().count() as f32 * char_width;
 
-    for ch in text.chars() {
-        if ch.is_whitespace() {
-            cursor_x += 8.0 * scale;
-            continue;
+        if cursor_x > start_x && cursor_x + word_width > max_x {
+            cursor_x = start_x;
+            cursor_y += line_height;
         }
 
-        if let Some(bitmap) = font8x8::BASIC_FONTS
-            .get(ch)
-            .or_else(|| font8x8::LATIN_FONTS.get(ch))
-        {
-            for (y, row) in bitmap.iter().enumerate() {
-                for x in 0..8 {
-                    if (*row & (1 << x)) != 0 {
-                        let px = cursor_x + (x as f32 * scale);
-                        let py = cursor_y + (y as f32 * scale);
+        for ch in word.chars() {
+            if cursor_x + char_width > max_x && cursor_x > start_x {
+                cursor_x = start_x;
+                cursor_y += line_height;
+            }
 
-                        if let Some(rect) = Rect::from_xywh(px, py, scale, scale) {
-                            pixmap.fill_rect(rect, &paint, Transform::identity(), None);
+            if cursor_y + (8.0 * scale) > pixmap.height() as f32 {
+                return;
+            }
+
+            if let Some(bitmap) = font8x8::BASIC_FONTS
+                .get(ch)
+                .or_else(|| font8x8::LATIN_FONTS.get(ch))
+            {
+                for (y, row) in bitmap.iter().enumerate() {
+                    for x in 0..8 {
+                        if (*row & (1 << x)) != 0 {
+                            let px = cursor_x + (x as f32 * scale);
+                            let py = cursor_y + (y as f32 * scale);
+
+                            if let Some(rect) = Rect::from_xywh(px, py, scale, scale) {
+                                pixmap.fill_rect(rect, &paint, Transform::identity(), None);
+                            }
                         }
                     }
                 }
             }
+            cursor_x += char_width;
         }
-        cursor_x += 8.0 * scale;
 
-        if cursor_x + (8.0 * scale) > max_x {
-            cursor_x = start_x;
+        if i + 1 < words.len() {
+            cursor_x += char_width;
         }
     }
 }

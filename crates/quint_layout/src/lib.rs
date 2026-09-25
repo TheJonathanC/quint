@@ -1,7 +1,7 @@
 mod layout;
 mod types;
 
-pub use layout::{layout_block, lookup_px, to_px};
+pub use layout::{is_auto, is_hidden, layout_block, lookup_px, parse_length, to_px};
 pub use types::{BoxDimensions, EdgeSizes, LayoutBox, Rect};
 
 use quint_style::StyledNode;
@@ -15,6 +15,9 @@ pub fn layout_tree<'a>(
 
     let mut boxes = Vec::new();
     for styled in styled_nodes {
+        if is_hidden(styled) {
+            continue;
+        }
         let b = layout_block(styled, &mut containing_block);
         containing_block.content.height += b.dimensions.margin_box().height;
         boxes.push(b);
@@ -251,5 +254,59 @@ mod tests {
         let boxes = layout_tree(&arr, 800.0);
         let pb = boxes[0].dimensions.padding_box();
         assert_eq!(pb.height, 120.0);
+    }
+
+    #[test]
+    fn text_node_calculates_height() {
+        let text_node = Node::Text("Hello World".into());
+        let styled_text = styled_elem(&text_node, &[], vec![]);
+        let parent_node = Node::Element {
+            tag: "p".into(),
+            attributes: vec![],
+            children: vec![],
+        };
+        let parent = styled_elem(&parent_node, &[], vec![styled_text]);
+        let arr = [parent];
+        let boxes = layout_tree(&arr, 800.0);
+        assert_eq!(boxes[0].dimensions.content.height, 20.0);
+    }
+
+    #[test]
+    fn margin_shorthand_centers_auto() {
+        let node = Node::Element {
+            tag: "div".into(),
+            attributes: vec![],
+            children: vec![],
+        };
+        let styled = styled_elem(
+            &node,
+            &[("width", "400px"), ("margin", "10px auto")],
+            vec![],
+        );
+        let arr = [styled];
+        let boxes = layout_tree(&arr, 800.0);
+        assert_eq!(boxes[0].dimensions.content.width, 400.0);
+        assert_eq!(boxes[0].dimensions.margin.left, 200.0);
+        assert_eq!(boxes[0].dimensions.margin.right, 200.0);
+        assert_eq!(boxes[0].dimensions.margin.top, 10.0);
+    }
+
+    #[test]
+    fn hidden_tags_skipped() {
+        let head_node = Node::Element {
+            tag: "head".into(),
+            attributes: vec![],
+            children: vec![],
+        };
+        let styled_head = styled_elem(&head_node, &[], vec![]);
+        let body_node = Node::Element {
+            tag: "body".into(),
+            attributes: vec![],
+            children: vec![],
+        };
+        let styled_body = styled_elem(&body_node, &[], vec![]);
+        let arr = [styled_head, styled_body];
+        let boxes = layout_tree(&arr, 800.0);
+        assert_eq!(boxes.len(), 1);
     }
 }

@@ -187,6 +187,14 @@ fn parse_selector(chars: &mut Peekable<Chars>) -> Option<Selector> {
                     parsed_something = true;
                 }
             }
+            Some(&':') => {
+                chars.next();
+                if chars.peek() == Some(&':') {
+                    chars.next();
+                }
+                let _pseudo = parse_identifier(chars);
+                parsed_something = true;
+            }
             _ => break,
         }
     }

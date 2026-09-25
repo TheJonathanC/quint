@@ -132,7 +132,8 @@ fn main() {
         process::exit(0);
     }
 
-    let css = extract_styles(&dom);
+    let mut css = String::from("head, title, style, script, link, meta, noscript { display: none; }\n");
+    css.push_str(&extract_styles(&dom));
     let stylesheet = quint_css::parse(&css);
     let styled_tree = quint_style::style_tree(&dom, &stylesheet, &PropertyMap::new());
 
