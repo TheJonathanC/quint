@@ -5,21 +5,18 @@ use std::process;
 
 fn print_usage() {
     println!("USAGE:");
-    println!("    quint <URL>");
-    println!("    quint --html <STRING>");
-    println!("    quint --dom-only <URL>       # print only the raw DOM");
-    println!("    quint --help");
-    println!();
-    println!("ARGUMENTS:");
-    println!("    <URL>              An HTTP or HTTPS URL to fetch and parse");
-    println!();
-    println!("OPTIONS:");
-    println!("    --html <STRING>    Parse a raw HTML string directly (for debugging)");
-    println!("    --dom-only         Skip CSS resolution and only print the DOM tree");
-    println!("    -h, --help         Show this help message");
+    println!(
+        "    quint <URL>                           # default: print layout tree (800px viewport)"
+    );
+    println!("    quint --width 1024 <URL>              # layout with custom viewport width");
+    println!("    quint --styled <URL>                  # print styled tree");
+    println!("    quint --dom-only <URL>                # print only the raw DOM");
+    println!("    quint --html <STRING>                 # Parse a raw HTML string directly");
+    println!("    quint --help                          # Show this help message");
     println!();
     println!("EXAMPLES:");
     println!("    quint https://example.com");
+    println!("    quint --width 1920 https://example.com");
     println!("    quint --html '<h1>Hello</h1>'");
 }
 
@@ -63,14 +60,31 @@ fn main() {
     }
 
     let mut is_dom_only = false;
+    let mut is_styled = false;
     let mut is_html = false;
     let mut html_str = "";
     let mut url = "";
+    let mut width = 800.0;
 
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--dom-only" {
             is_dom_only = true;
+        } else if args[i] == "--styled" {
+            is_styled = true;
+        } else if args[i] == "--width" {
+            if i + 1 < args.len() {
+                if let Ok(w) = args[i + 1].parse::<f32>() {
+                    width = w.max(0.0);
+                } else {
+                    eprintln!("error: --width requires a valid number");
+                    process::exit(1);
+                }
+                i += 1;
+            } else {
+                eprintln!("error: --width requires a value");
+                process::exit(1);
+            }
         } else if args[i] == "--html" {
             is_html = true;
             if i + 1 < args.len() {
@@ -118,5 +132,11 @@ fn main() {
     let stylesheet = quint_css::parse(&css);
     let styled_tree = quint_style::style_tree(&dom, &stylesheet, &PropertyMap::new());
 
-    println!("{:#?}", styled_tree);
+    if is_styled {
+        println!("{:#?}", styled_tree);
+        process::exit(0);
+    }
+
+    let layout_tree = quint_layout::layout_tree(&styled_tree, width);
+    println!("{:#?}", layout_tree);
 }
