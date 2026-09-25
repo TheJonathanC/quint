@@ -18,6 +18,17 @@ pub fn execute_script(dom: &mut Vec<Node>, script: &str) -> Result<(), String> {
 
     // 3. Document Polyfill
     let polyfill = r#"
+        function toRustNode(child) {
+            if (!child) return child;
+            if (child.Element) {
+                return { Element: child.Element };
+            }
+            if (child.Text !== undefined) {
+                return { Text: child.Text };
+            }
+            return child;
+        }
+
         class Element {
             constructor(tag) {
                 this.Element = {
@@ -32,13 +43,7 @@ pub fn execute_script(dom: &mut Vec<Node>, script: &str) -> Result<(), String> {
                 else { this.Element.attributes.push([name, value]); }
             }
             appendChild(child) {
-                if (child.Element) {
-                    this.Element.children.push(child.Element);
-                } else if (child.Text !== undefined) {
-                    this.Element.children.push(child);
-                } else {
-                    this.Element.children.push(child);
-                }
+                this.Element.children.push(toRustNode(child));
             }
         }
         
@@ -53,13 +58,7 @@ pub fn execute_script(dom: &mut Vec<Node>, script: &str) -> Result<(), String> {
                     else { this.Element.attributes.push([name, value]); }
                 },
                 appendChild(child) {
-                    if (child.Element) {
-                        this.Element.children.push(child.Element);
-                    } else if (child.Text !== undefined) {
-                        this.Element.children.push(child);
-                    } else {
-                        this.Element.children.push(child);
-                    }
+                    this.Element.children.push(toRustNode(child));
                 }
             };
             
