@@ -3,8 +3,8 @@ use quint_style::StyledNode;
 
 pub fn to_px(value: &str) -> f32 {
     let trimmed = value.trim();
-    if trimmed.ends_with("px") {
-        trimmed[..trimmed.len() - 2].parse().unwrap_or(0.0)
+    if let Some(stripped) = trimmed.strip_suffix("px") {
+        stripped.parse().unwrap_or(0.0)
     } else {
         trimmed.parse().unwrap_or(0.0)
     }
@@ -61,11 +61,8 @@ fn calculate_block_width(layout_box: &mut LayoutBox, containing_block: &BoxDimen
         margin_left + border_left + padding_left + border_right + padding_right + margin_right;
 
     let (content_width, final_margin_left, final_margin_right) =
-        if width.is_none() || width == Some("auto") {
-            let auto_width = (container_width - total).max(0.0);
-            (auto_width, margin_left, margin_right)
-        } else {
-            let w = to_px(width.unwrap());
+        if let Some(w_str) = width.filter(|&w| w != "auto") {
+            let w = to_px(w_str);
             let remaining = container_width - total - w;
 
             let ml_auto = is_auto(styled, "margin-left");
@@ -80,6 +77,9 @@ fn calculate_block_width(layout_box: &mut LayoutBox, containing_block: &BoxDimen
                 (false, true) => (w, margin_left, remaining.max(0.0)),
                 (false, false) => (w, margin_left, margin_right + remaining),
             }
+        } else {
+            let auto_width = (container_width - total).max(0.0);
+            (auto_width, margin_left, margin_right)
         };
 
     let d = &mut layout_box.dimensions;
