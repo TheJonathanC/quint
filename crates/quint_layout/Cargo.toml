@@ -6,5 +6,5 @@ edition = "2024"
 [dependencies]
 quint_style = { path = "../quint_style" }
 quint_html = { path = "../quint_html" }
-taffy = "0.3.18"
-ab_glyph = "0.2.32"
+taffy = "0.3.19"
+ab_glyph = "0.2"

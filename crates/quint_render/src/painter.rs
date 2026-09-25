@@ -1,7 +1,9 @@
 use crate::color::parse_color;
-use ab_glyph::{FontRef, Font, PxScale, point, ScaleFont};
+use ab_glyph::{FontRef, Font, PxScale, ScaleFont, point, OutlineCurve};
 use quint_layout::LayoutBox;
-use tiny_skia::{Color, Paint, Pixmap, Rect, Transform};
+use vello::kurbo::{Affine, Rect, BezPath, PathEl};
+use vello::peniko::{Color, Fill};
+use vello::Scene;
 use std::sync::OnceLock;
 
 static FONT: OnceLock<FontRef> = OnceLock::new();
@@ -13,14 +15,20 @@ fn get_font() -> &'static FontRef<'static> {
     })
 }
 
-pub fn paint_tree(layout_tree: &[LayoutBox], pixmap: &mut Pixmap) {
-    pixmap.fill(Color::WHITE);
+pub fn paint_tree(layout_tree: &[LayoutBox], scene: &mut Scene) {
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        Color::WHITE,
+        None,
+        &Rect::new(0.0, 0.0, 4000.0, 4000.0),
+    );
     for box_node in layout_tree {
-        paint_box(box_node, pixmap);
+        paint_box(box_node, scene);
     }
 }
 
-fn paint_box(layout_box: &LayoutBox, pixmap: &mut Pixmap) {
+fn paint_box(layout_box: &LayoutBox, scene: &mut Scene) {
     let background_prop = layout_box
         .styled_node
         .properties
@@ -28,14 +36,15 @@ fn paint_box(layout_box: &LayoutBox, pixmap: &mut Pixmap) {
         .or_else(|| layout_box.styled_node.properties.get("background"));
 
     if let Some(color) = background_prop.and_then(|c| parse_color(c)) {
-        let mut paint = Paint::default();
-        paint.set_color(color);
-
         let rect = layout_box.dimensions.border_box();
         if rect.width > 0.0 && rect.height > 0.0 {
-            if let Some(skia_rect) = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height) {
-                pixmap.fill_rect(skia_rect, &paint, Transform::identity(), None);
-            }
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                color,
+                None,
+                &Rect::new(rect.x as f64, rect.y as f64, (rect.x + rect.width) as f64, (rect.y + rect.height) as f64),
+            );
         }
     }
 
@@ -49,7 +58,7 @@ fn paint_box(layout_box: &LayoutBox, pixmap: &mut Pixmap) {
         let color = parse_color(color_str).unwrap_or(Color::BLACK);
 
         draw_text(
-            pixmap,
+            scene,
             text,
             layout_box.dimensions.content.x,
             layout_box.dimensions.content.y,
@@ -59,12 +68,12 @@ fn paint_box(layout_box: &LayoutBox, pixmap: &mut Pixmap) {
     }
 
     for child in &layout_box.children {
-        paint_box(child, pixmap);
+        paint_box(child, scene);
     }
 }
 
 fn draw_text(
-    pixmap: &mut Pixmap,
+    scene: &mut Scene,
     text: &str,
     start_x: f32,
     start_y: f32,
@@ -78,9 +87,9 @@ fn draw_text(
     let line_height = v_metrics * 1.2;
     
     let max_x = if max_box_width > 0.0 {
-        (start_x + max_box_width).min(pixmap.width() as f32)
+        start_x + max_box_width
     } else {
-        pixmap.width() as f32
+        10000.0
     };
 
     let mut cursor_x = start_x;
@@ -114,23 +123,52 @@ fn draw_text(
             }
             
             let glyph = glyph_id.with_scale_and_position(scale, point(cursor_x, cursor_y));
-            if let Some(outline) = font.outline_glyph(glyph) {
-                let bounds = outline.px_bounds();
-                outline.draw(|x, y, v| {
-                    let px = (bounds.min.x + x as f32) as u32;
-                    let py = (bounds.min.y + y as f32) as u32;
-                    let width = pixmap.width();
-                    let height = pixmap.height();
-                    if px < width && py < height {
-                        let idx = (py * width + px) as usize;
-                        let p = &mut pixmap.pixels_mut()[idx];
-                        let r = ((color.red() as f32 * v) + (p.red() as f32 * (1.0 - v))) as u8;
-                        let g = ((color.green() as f32 * v) + (p.green() as f32 * (1.0 - v))) as u8;
-                        let b = ((color.blue() as f32 * v) + (p.blue() as f32 * (1.0 - v))) as u8;
-                        let a = p.alpha();
-                        *p = tiny_skia::PremultipliedColorU8::from_rgba(r, g, b, 255).unwrap_or(*p);
+            
+            if let Some(outline) = font.outline(glyph_id) {
+                let mut path = BezPath::new();
+                for curve in outline.curves {
+                    match curve {
+                        OutlineCurve::Line(p0, p1) => {
+                            if path.elements().is_empty() {
+                                path.push(PathEl::MoveTo(vello::kurbo::Point::new(p0.x as f64, p0.y as f64)));
+                            }
+                            path.push(PathEl::LineTo(vello::kurbo::Point::new(p1.x as f64, p1.y as f64)));
+                        }
+                        OutlineCurve::Quad(p0, p1, p2) => {
+                            if path.elements().is_empty() {
+                                path.push(PathEl::MoveTo(vello::kurbo::Point::new(p0.x as f64, p0.y as f64)));
+                            }
+                            path.push(PathEl::QuadTo(
+                                vello::kurbo::Point::new(p1.x as f64, p1.y as f64),
+                                vello::kurbo::Point::new(p2.x as f64, p2.y as f64),
+                            ));
+                        }
+                        OutlineCurve::Cubic(p0, p1, p2, p3) => {
+                            if path.elements().is_empty() {
+                                path.push(PathEl::MoveTo(vello::kurbo::Point::new(p0.x as f64, p0.y as f64)));
+                            }
+                            path.push(PathEl::CurveTo(
+                                vello::kurbo::Point::new(p1.x as f64, p1.y as f64),
+                                vello::kurbo::Point::new(p2.x as f64, p2.y as f64),
+                                vello::kurbo::Point::new(p3.x as f64, p3.y as f64),
+                            ));
+                        }
                     }
-                });
+                }
+                
+                // The curves are in unscaled font units. We need to scale and translate them!
+                let scale_factor = font.as_scaled(scale).scale_factor();
+                
+                let transform = Affine::translate((cursor_x as f64, cursor_y as f64))
+                    * Affine::scale_non_uniform(scale_factor.horizontal as f64, -scale_factor.vertical as f64);
+                
+                scene.fill(
+                    Fill::NonZero,
+                    transform,
+                    color,
+                    None,
+                    &path,
+                );
             }
             cursor_x += font.as_scaled(scale).h_advance(glyph_id);
             last_glyph = Some(glyph_id);

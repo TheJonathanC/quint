@@ -8,6 +8,6 @@ quint_layout = { path = "../quint_layout" }
 quint_style = { path = "../quint_style" }
 quint_html = { path = "../quint_html" }
 winit = "0.29.15"
-softbuffer = "0.4.1"
-tiny-skia = "0.11.4"
 ab_glyph = "0.2.32"
+vello = "0.10.0"
+pollster = "1.0.1"
