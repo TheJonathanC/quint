@@ -47,6 +47,25 @@ fn extract_styles(nodes: &[Node]) -> String {
     css
 }
 
+fn extract_scripts(nodes: &[Node]) -> String {
+    let mut js = String::new();
+    for node in nodes {
+        if let Node::Element { tag, children, .. } = node {
+            if tag == "script" {
+                for child in children {
+                    if let Node::Text(text) = child {
+                        js.push_str(text);
+                        js.push('\n');
+                    }
+                }
+            } else {
+                js.push_str(&extract_scripts(children));
+            }
+        }
+    }
+    js
+}
+
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
 
@@ -104,7 +123,7 @@ fn main() {
         i += 1;
     }
 
-    let dom = if is_html {
+    let mut dom = if is_html {
         quint_html::parse(html_str)
     } else {
         if url.is_empty() {
@@ -113,10 +132,10 @@ fn main() {
         }
         match quint_net::fetch(url) {
             Ok(response) => {
-                if let Some(ct) = &response.content_type
-                    && !ct.contains("text/html")
-                {
-                    eprintln!("warning: Content-Type is '{}', expected text/html", ct);
+                if let Some(ct) = &response.content_type {
+                    if !ct.contains("text/html") {
+                        eprintln!("warning: Content-Type is '{}', expected text/html", ct);
+                    }
                 }
                 quint_html::parse(&response.body)
             }
@@ -127,12 +146,21 @@ fn main() {
         }
     };
 
+    // Extract and run JS
+    let js = extract_scripts(&dom);
+    if !js.trim().is_empty() {
+        if let Err(e) = quint_js::execute_script(&mut dom, &js) {
+            eprintln!("warning: JS execution failed: {}", e);
+        }
+    }
+
     if is_dom_only {
         println!("{:#?}", dom);
         process::exit(0);
     }
 
-    let mut css = String::from("head, title, style, script, link, meta, noscript { display: none; }\n");
+    let mut css =
+        String::from("head, title, style, script, link, meta, noscript { display: none; }\n");
     css.push_str(&extract_styles(&dom));
     let stylesheet = quint_css::parse(&css);
     let styled_tree = quint_style::style_tree(&dom, &stylesheet, &PropertyMap::new());

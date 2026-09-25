@@ -6,12 +6,21 @@ pub fn parse_length(value: &str, container_dimension: f32) -> Option<f32> {
     if let Some(stripped) = trimmed.strip_suffix("px") {
         stripped.parse().ok()
     } else if let Some(stripped) = trimmed.strip_suffix("vw") {
-        stripped.parse::<f32>().ok().map(|v| v * container_dimension / 100.0)
+        stripped
+            .parse::<f32>()
+            .ok()
+            .map(|v| v * container_dimension / 100.0)
     } else if let Some(stripped) = trimmed.strip_suffix("vh") {
         stripped.parse::<f32>().ok().map(|v| v * 600.0 / 100.0)
     } else if let Some(stripped) = trimmed.strip_suffix('%') {
-        stripped.parse::<f32>().ok().map(|v| v * container_dimension / 100.0)
-    } else if let Some(stripped) = trimmed.strip_suffix("em").or_else(|| trimmed.strip_suffix("rem")) {
+        stripped
+            .parse::<f32>()
+            .ok()
+            .map(|v| v * container_dimension / 100.0)
+    } else if let Some(stripped) = trimmed
+        .strip_suffix("em")
+        .or_else(|| trimmed.strip_suffix("rem"))
+    {
         stripped.parse::<f32>().ok().map(|v| v * 16.0)
     } else if let Some(stripped) = trimmed.strip_suffix("pt") {
         stripped.parse::<f32>().ok().map(|v| v * 96.0 / 72.0)

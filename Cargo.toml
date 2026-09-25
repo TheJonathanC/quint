@@ -14,3 +14,4 @@ quint_css = { path = "crates/quint_css" }
 quint_style = { path = "crates/quint_style" }
 quint_layout = { path = "crates/quint_layout" }
 quint_render = { path = "crates/quint_render" }
+quint_js = { path = "crates/quint_js" }
