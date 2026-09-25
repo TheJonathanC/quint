@@ -1,5 +1,16 @@
 use crate::types::{BoxDimensions, LayoutBox};
 use quint_style::StyledNode;
+use ab_glyph::{FontRef, Font, PxScale, ScaleFont};
+use std::sync::OnceLock;
+
+static FONT: OnceLock<FontRef> = OnceLock::new();
+
+fn get_font() -> &'static FontRef<'static> {
+    FONT.get_or_init(|| {
+        let font_data = include_bytes!("Roboto-Regular.ttf");
+        FontRef::try_from_slice(font_data).unwrap()
+    })
+}
 
 pub fn parse_length(value: &str, container_dimension: f32) -> Option<f32> {
     let trimmed = value.trim();
@@ -299,30 +310,44 @@ fn calculate_block_height(layout_box: &mut LayoutBox) {
         }
     }
 
-    if let quint_html::Node::Text(text) = layout_box.styled_node.node {
+    if let quint_html::Node::Text(text) = &layout_box.styled_node.node {
         let words: Vec<&str> = text.split_whitespace().collect();
         if words.is_empty() {
             layout_box.dimensions.content.height = 0.0;
             return;
         }
 
-        let scale = 2.0;
-        let char_width = 8.0 * scale;
-        let line_height = 20.0;
-        let max_width = layout_box.dimensions.content.width.max(char_width);
+        let font = get_font();
+        let font_size = 16.0;
+        let scale = PxScale { x: font_size, y: font_size };
+        
+        let v_metrics = font.as_scaled(scale).ascent() - font.as_scaled(scale).descent() + font.as_scaled(scale).line_gap();
+        let line_height = v_metrics * 1.2;
+        let space_width = font.as_scaled(scale).h_advance(font.glyph_id(' '));
+        let max_width = layout_box.dimensions.content.width.max(space_width);
 
         let mut lines = 1;
         let mut cur_x = 0.0;
 
         for (i, word) in words.iter().enumerate() {
-            let word_w = word.chars().count() as f32 * char_width;
-            if cur_x > 0.0 && cur_x + word_w > max_width {
+            let mut word_width = 0.0;
+            let mut last_glyph = None;
+            for ch in word.chars() {
+                let glyph_id = font.glyph_id(ch);
+                word_width += font.as_scaled(scale).h_advance(glyph_id);
+                if let Some(last) = last_glyph {
+                    word_width += font.as_scaled(scale).kern(last, glyph_id);
+                }
+                last_glyph = Some(glyph_id);
+            }
+
+            if cur_x > 0.0 && cur_x + word_width > max_width {
                 lines += 1;
                 cur_x = 0.0;
             }
-            cur_x += word_w;
+            cur_x += word_width;
             if i + 1 < words.len() {
-                cur_x += char_width;
+                cur_x += space_width;
             }
         }
 
