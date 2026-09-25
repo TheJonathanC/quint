@@ -52,10 +52,20 @@ pub fn fetch(url: &str) -> Result<FetchResponse, FetchError> {
         ));
     }
 
-    let response = ureq::get(url).call()?;
+    let response = match ureq::get(url).call() {
+        Ok(res) => res,
+        Err(ureq::Error::StatusCode(code)) => {
+            return Err(FetchError::HttpStatus {
+                status: code,
+                url: url.to_string(),
+            });
+        }
+        Err(e) => return Err(FetchError::Network(e)),
+    };
 
     let status = response.status();
     let status_code = status.as_u16();
+    // In case the above match didn't catch it or ureq is configured otherwise
     if status_code >= 400 {
         return Err(FetchError::HttpStatus {
             status: status_code,

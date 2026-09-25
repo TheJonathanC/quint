@@ -21,3 +21,10 @@ fn fetch_nonexistent_domain() {
     let err = fetch("https://this-domain-does-not-exist-quint-test.example").unwrap_err();
     assert!(matches!(err, FetchError::Network(_)));
 }
+
+#[test]
+#[ignore]
+fn fetch_404_returns_http_status_error() {
+    let err = fetch("https://httpbin.org/status/404").unwrap_err();
+    assert!(matches!(err, FetchError::HttpStatus { status: 404, .. }));
+}
