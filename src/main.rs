@@ -6,9 +6,10 @@ use std::process;
 fn print_usage() {
     println!("USAGE:");
     println!(
-        "    quint <URL>                           # default: print layout tree (800px viewport)"
+        "    quint <URL>                           # default: render layout tree (800px viewport)"
     );
-    println!("    quint --width 1024 <URL>              # layout with custom viewport width");
+    println!("    quint --width 1024 <URL>              # render with custom viewport width");
+    println!("    quint --layout <URL>                  # print layout tree instead of rendering");
     println!("    quint --styled <URL>                  # print styled tree");
     println!("    quint --dom-only <URL>                # print only the raw DOM");
     println!("    quint --html <STRING>                 # Parse a raw HTML string directly");
@@ -61,6 +62,7 @@ fn main() {
 
     let mut is_dom_only = false;
     let mut is_styled = false;
+    let mut is_layout = false;
     let mut is_html = false;
     let mut html_str = "";
     let mut url = "";
@@ -72,6 +74,8 @@ fn main() {
             is_dom_only = true;
         } else if args[i] == "--styled" {
             is_styled = true;
+        } else if args[i] == "--layout" {
+            is_layout = true;
         } else if args[i] == "--width" {
             if i + 1 < args.len() {
                 if let Ok(w) = args[i + 1].parse::<f32>() {
@@ -138,5 +142,12 @@ fn main() {
     }
 
     let layout_tree = quint_layout::layout_tree(&styled_tree, width);
-    println!("{:#?}", layout_tree);
+
+    if is_layout {
+        println!("{:#?}", layout_tree);
+        process::exit(0);
+    }
+
+    // Default action: render the GUI window
+    quint_render::render_window(layout_tree, width);
 }
