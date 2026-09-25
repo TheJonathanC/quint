@@ -10,9 +10,10 @@ pub fn matches(node: &Node, selector: &Selector) -> bool {
             tag, attributes, ..
         } => {
             if let Some(sel_tag) = &selector.tag
-                && sel_tag != tag {
-                    return false;
-                }
+                && sel_tag != tag
+            {
+                return false;
+            }
 
             if let Some(sel_id) = &selector.id {
                 let elem_id = attributes
@@ -98,8 +99,9 @@ const INHERITED_PROPERTIES: &[&str] = &[
 pub fn inherit(child_props: &mut PropertyMap, parent_props: &PropertyMap) {
     for &prop in INHERITED_PROPERTIES {
         if !child_props.contains_key(prop)
-            && let Some(value) = parent_props.get(prop) {
-                child_props.insert(prop.to_string(), value.clone());
-            }
+            && let Some(value) = parent_props.get(prop)
+        {
+            child_props.insert(prop.to_string(), value.clone());
+        }
     }
 }

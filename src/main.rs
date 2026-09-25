@@ -96,9 +96,10 @@ fn main() {
         match quint_net::fetch(url) {
             Ok(response) => {
                 if let Some(ct) = &response.content_type
-                    && !ct.contains("text/html") {
-                        eprintln!("warning: Content-Type is '{}', expected text/html", ct);
-                    }
+                    && !ct.contains("text/html")
+                {
+                    eprintln!("warning: Content-Type is '{}', expected text/html", ct);
+                }
                 quint_html::parse(&response.body)
             }
             Err(e) => {
