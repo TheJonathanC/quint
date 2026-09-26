@@ -27,6 +27,7 @@ pub fn render_window(layout_tree: Vec<LayoutBox>, initial_width: f32) {
     )).unwrap();
 
     let device_handle = &render_cx.devices[surface.dev_id];
+    let blitter = vello::wgpu::util::TextureBlitter::new(&device_handle.device, surface.config.format);
     let mut renderer = Renderer::new(
         &device_handle.device,
         RendererOptions {
@@ -39,6 +40,7 @@ pub fn render_window(layout_tree: Vec<LayoutBox>, initial_width: f32) {
     .unwrap();
 
     let mut surface = Some(surface);
+    let mut intermediate: Option<(vello::wgpu::Texture, vello::wgpu::TextureView)> = None;
 
     event_loop
         .run(move |event, elwt| {
@@ -73,6 +75,29 @@ pub fn render_window(layout_tree: Vec<LayoutBox>, initial_width: f32) {
                             _ => return,
                         };
 
+                        let (target_texture, target_view) = intermediate
+                            .take()
+                            .filter(|(tex, _)| tex.width() == size.width && tex.height() == size.height)
+                            .unwrap_or_else(|| {
+                                let tex = device_handle.device.create_texture(&vello::wgpu::TextureDescriptor {
+                                    label: Some("vello_intermediate_texture"),
+                                    size: vello::wgpu::Extent3d {
+                                        width: size.width,
+                                        height: size.height,
+                                        depth_or_array_layers: 1,
+                                    },
+                                    mip_level_count: 1,
+                                    sample_count: 1,
+                                    dimension: vello::wgpu::TextureDimension::D2,
+                                    format: vello::wgpu::TextureFormat::Rgba8Unorm,
+                                    usage: vello::wgpu::TextureUsages::STORAGE_BINDING
+                                        | vello::wgpu::TextureUsages::TEXTURE_BINDING,
+                                    view_formats: &[],
+                                });
+                                let view = tex.create_view(&vello::wgpu::TextureViewDescriptor::default());
+                                (tex, view)
+                            });
+
                         let mut scene = Scene::new();
                         painter::paint_tree(&layout_tree, &mut scene);
 
@@ -81,7 +106,7 @@ pub fn render_window(layout_tree: Vec<LayoutBox>, initial_width: f32) {
                                 &device_handle.device,
                                 &device_handle.queue,
                                 &scene,
-                                &surface_texture.texture.create_view(&vello::wgpu::TextureViewDescriptor::default()),
+                                &target_view,
                                 &vello::RenderParams {
                                     base_color: vello::peniko::Color::WHITE,
                                     width: size.width,
@@ -89,9 +114,29 @@ pub fn render_window(layout_tree: Vec<LayoutBox>, initial_width: f32) {
                                     antialiasing_method: vello::AaConfig::Msaa16,
                                 },
                             )
-                            .expect("failed to render to surface");
+                            .expect("failed to render to intermediate texture");
 
+                        let surface_view = surface_texture
+                            .texture
+                            .create_view(&vello::wgpu::TextureViewDescriptor::default());
+
+                        let mut encoder = device_handle
+                            .device
+                            .create_command_encoder(&vello::wgpu::CommandEncoderDescriptor {
+                                label: Some("blitter_encoder"),
+                            });
+
+                        blitter.copy(
+                            &device_handle.device,
+                            &mut encoder,
+                            &target_view,
+                            &surface_view,
+                        );
+
+                        device_handle.queue.submit([encoder.finish()]);
                         surface_texture.present();
+
+                        intermediate = Some((target_texture, target_view));
                     }
                 }
                 Event::WindowEvent {

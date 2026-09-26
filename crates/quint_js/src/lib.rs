@@ -2,6 +2,32 @@ use boa_engine::{Context, Source};
 use quint_html::Node;
 
 pub fn execute_script(dom: &mut Vec<Node>, script: &str) -> Result<(), String> {
+    let dom_clone = dom.clone();
+    let script_owned = script.to_string();
+
+    let handle = std::thread::Builder::new()
+        .name("js-runtime".to_string())
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || -> Result<Vec<Node>, String> {
+            let mut dom_clone = dom_clone;
+            execute_script_inner(&mut dom_clone, &script_owned)?;
+            Ok(dom_clone)
+        })
+        .map_err(|e| e.to_string())?;
+
+    match handle.join() {
+        Ok(result) => {
+            let new_dom = result?;
+            *dom = new_dom;
+            Ok(())
+        }
+        Err(e) => {
+            Err(format!("JS thread terminated: {:?}", e))
+        }
+    }
+}
+
+fn execute_script_inner(dom: &mut Vec<Node>, script: &str) -> Result<(), String> {
     let mut context = Context::default();
 
     // 1. Serialize DOM to JSON
@@ -83,7 +109,26 @@ pub fn execute_script(dom: &mut Vec<Node>, script: &str) -> Result<(), String> {
                 }
                 return search(this._tree);
             },
-            body: null
+            body: null,
+            documentElement: null,
+            compatMode: "CSS1Compat",
+            addEventListener: function() {},
+            removeEventListener: function() {},
+            getElementsByTagName: function(tag) {
+                let matches = [];
+                function search(nodes) {
+                    for (let node of nodes) {
+                        if (node.Element) {
+                            if (node.Element.tag === tag || tag === '*') {
+                                matches.push(wrapNode(node));
+                            }
+                            search(node.Element.children);
+                        }
+                    }
+                }
+                search(this._tree);
+                return matches;
+            }
         };
         
         for (let node of document._tree) {
@@ -92,6 +137,7 @@ pub fn execute_script(dom: &mut Vec<Node>, script: &str) -> Result<(), String> {
                 break;
             }
             if (node.Element && node.Element.tag === 'html') {
+                document.documentElement = wrapNode(node);
                 for (let child of node.Element.children) {
                     if (child.Element && child.Element.tag === 'body') {
                         document.body = wrapNode(child);
@@ -103,6 +149,36 @@ pub fn execute_script(dom: &mut Vec<Node>, script: &str) -> Result<(), String> {
         if (!document.body && document._tree.length > 0) {
             document.body = wrapNode(document._tree[0]);
         }
+        if (!document.documentElement && document._tree.length > 0) {
+            document.documentElement = wrapNode(document._tree[0]);
+        }
+
+        const window = globalThis;
+        const self = globalThis;
+        window.window = window;
+        window.self = window;
+        window.document = document;
+        window.location = {
+            href: "https://google.com",
+            protocol: "https:",
+            host: "google.com",
+            hostname: "google.com",
+            pathname: "/",
+            search: "",
+            hash: ""
+        };
+        window.navigator = {
+            userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Quint/1.0",
+            language: "en-US",
+            languages: ["en-US", "en"]
+        };
+        window.innerWidth = 800;
+        window.innerHeight = 600;
+        window.addEventListener = function() {};
+        window.removeEventListener = function() {};
+        window.setTimeout = function(fn) { return 0; };
+        window.clearTimeout = function() {};
+        window.requestAnimationFrame = function(fn) { return 0; };
     "#;
 
     context

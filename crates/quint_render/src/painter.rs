@@ -57,12 +57,20 @@ fn paint_box(layout_box: &LayoutBox, scene: &mut Scene) {
             .unwrap_or("black");
         let color = parse_color(color_str).unwrap_or(Color::BLACK);
 
+        let font_size = layout_box
+            .styled_node
+            .properties
+            .get("font-size")
+            .and_then(|s| quint_layout::parse_length(s, 16.0))
+            .unwrap_or(16.0);
+
         draw_text(
             scene,
             text,
             layout_box.dimensions.content.x,
             layout_box.dimensions.content.y,
             layout_box.dimensions.content.width,
+            font_size,
             color,
         );
     }
@@ -78,10 +86,10 @@ fn draw_text(
     start_x: f32,
     start_y: f32,
     max_box_width: f32,
+    font_size: f32,
     color: Color,
 ) {
     let font = get_font();
-    let font_size = 16.0;
     let scale = PxScale { x: font_size, y: font_size };
     let v_metrics = font.as_scaled(scale).ascent() - font.as_scaled(scale).descent() + font.as_scaled(scale).line_gap();
     let line_height = v_metrics * 1.2;
@@ -122,36 +130,42 @@ fn draw_text(
                 cursor_x += font.as_scaled(scale).kern(last, glyph_id);
             }
             
-            let glyph = glyph_id.with_scale_and_position(scale, point(cursor_x, cursor_y));
+            let _glyph = glyph_id.with_scale_and_position(scale, point(cursor_x, cursor_y));
             
             if let Some(outline) = font.outline(glyph_id) {
                 let mut path = BezPath::new();
+                let mut current_point: Option<vello::kurbo::Point> = None;
                 for curve in outline.curves {
                     match curve {
                         OutlineCurve::Line(p0, p1) => {
-                            if path.elements().is_empty() {
-                                path.push(PathEl::MoveTo(vello::kurbo::Point::new(p0.x as f64, p0.y as f64)));
+                            let start = vello::kurbo::Point::new(p0.x as f64, p0.y as f64);
+                            let end = vello::kurbo::Point::new(p1.x as f64, p1.y as f64);
+                            if current_point.map_or(true, |cp| cp != start) {
+                                path.push(PathEl::MoveTo(start));
                             }
-                            path.push(PathEl::LineTo(vello::kurbo::Point::new(p1.x as f64, p1.y as f64)));
+                            path.push(PathEl::LineTo(end));
+                            current_point = Some(end);
                         }
                         OutlineCurve::Quad(p0, p1, p2) => {
-                            if path.elements().is_empty() {
-                                path.push(PathEl::MoveTo(vello::kurbo::Point::new(p0.x as f64, p0.y as f64)));
+                            let start = vello::kurbo::Point::new(p0.x as f64, p0.y as f64);
+                            let ctrl = vello::kurbo::Point::new(p1.x as f64, p1.y as f64);
+                            let end = vello::kurbo::Point::new(p2.x as f64, p2.y as f64);
+                            if current_point.map_or(true, |cp| cp != start) {
+                                path.push(PathEl::MoveTo(start));
                             }
-                            path.push(PathEl::QuadTo(
-                                vello::kurbo::Point::new(p1.x as f64, p1.y as f64),
-                                vello::kurbo::Point::new(p2.x as f64, p2.y as f64),
-                            ));
+                            path.push(PathEl::QuadTo(ctrl, end));
+                            current_point = Some(end);
                         }
                         OutlineCurve::Cubic(p0, p1, p2, p3) => {
-                            if path.elements().is_empty() {
-                                path.push(PathEl::MoveTo(vello::kurbo::Point::new(p0.x as f64, p0.y as f64)));
+                            let start = vello::kurbo::Point::new(p0.x as f64, p0.y as f64);
+                            let ctrl1 = vello::kurbo::Point::new(p1.x as f64, p1.y as f64);
+                            let ctrl2 = vello::kurbo::Point::new(p2.x as f64, p2.y as f64);
+                            let end = vello::kurbo::Point::new(p3.x as f64, p3.y as f64);
+                            if current_point.map_or(true, |cp| cp != start) {
+                                path.push(PathEl::MoveTo(start));
                             }
-                            path.push(PathEl::CurveTo(
-                                vello::kurbo::Point::new(p1.x as f64, p1.y as f64),
-                                vello::kurbo::Point::new(p2.x as f64, p2.y as f64),
-                                vello::kurbo::Point::new(p3.x as f64, p3.y as f64),
-                            ));
+                            path.push(PathEl::CurveTo(ctrl1, ctrl2, end));
+                            current_point = Some(end);
                         }
                     }
                 }
