@@ -66,6 +66,70 @@ fn extract_scripts(nodes: &[Node]) -> String {
     js
 }
 
+fn extract_linked_stylesheets(nodes: &[Node]) -> Vec<String> {
+    let mut hrefs = Vec::new();
+    collect_links(nodes, &mut hrefs);
+    hrefs
+}
+
+fn collect_links(nodes: &[Node], hrefs: &mut Vec<String>) {
+    for node in nodes {
+        if let Node::Element { tag, children, .. } = node {
+            if tag == "link" {
+                let is_stylesheet = node
+                    .get_attribute("rel")
+                    .map(|r| r.eq_ignore_ascii_case("stylesheet"))
+                    .unwrap_or(false);
+                if is_stylesheet
+                    && let Some(href) = node.get_attribute("href")
+                {
+                    hrefs.push(href.to_string());
+                }
+            }
+            collect_links(children, hrefs);
+        }
+    }
+}
+
+fn extract_script_srcs(nodes: &[Node]) -> Vec<String> {
+    let mut srcs = Vec::new();
+    collect_script_srcs(nodes, &mut srcs);
+    srcs
+}
+
+fn collect_script_srcs(nodes: &[Node], srcs: &mut Vec<String>) {
+    for node in nodes {
+        if let Node::Element { tag, children, .. } = node {
+            if tag == "script"
+                && let Some(src) = node.get_attribute("src")
+            {
+                srcs.push(src.to_string());
+            }
+            collect_script_srcs(children, srcs);
+        }
+    }
+}
+
+fn load_resource(base: &str, target: &str) -> Result<String, String> {
+    if base.starts_with("http://") || base.starts_with("https://") {
+        let full_url = quint_net::resolve_url(base, target);
+        match quint_net::fetch(&full_url) {
+            Ok(resp) => Ok(resp.body),
+            Err(e) => Err(format!("failed to fetch {}: {}", full_url, e)),
+        }
+    } else {
+        let base_path = if let Some(stripped) = base.strip_prefix("file://") {
+            std::path::Path::new(stripped)
+        } else {
+            std::path::Path::new(base)
+        };
+        let dir = base_path.parent().unwrap_or(std::path::Path::new("."));
+        let target_path = dir.join(target);
+        std::fs::read_to_string(&target_path)
+            .map_err(|e| format!("failed to read file {:?}: {}", target_path, e))
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
 
@@ -123,35 +187,72 @@ fn main() {
         i += 1;
     }
 
-    let mut dom = if is_html {
-        quint_html::parse(html_str)
+    let (mut dom, base_target) = if is_html {
+        (quint_html::parse(html_str), String::new())
     } else {
         if url.is_empty() {
             eprint_usage();
             process::exit(1);
         }
-        match quint_net::fetch(url) {
-            Ok(response) => {
-                if let Some(ct) = &response.content_type {
-                    if !ct.contains("text/html") {
+
+        let is_http = url.starts_with("http://") || url.starts_with("https://");
+        let is_file = url.starts_with("file://") || std::path::Path::new(url).exists();
+
+        if is_http {
+            match quint_net::fetch(url) {
+                Ok(response) => {
+                    if let Some(ct) = &response.content_type
+                        && !ct.contains("text/html")
+                    {
                         eprintln!("warning: Content-Type is '{}', expected text/html", ct);
                     }
+                    (quint_html::parse(&response.body), response.final_url)
                 }
-                quint_html::parse(&response.body)
+                Err(e) => {
+                    eprintln!("error: {}", e);
+                    process::exit(1);
+                }
             }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                process::exit(1);
+        } else if is_file {
+            let file_path = url.strip_prefix("file://").unwrap_or(url);
+            match std::fs::read_to_string(file_path) {
+                Ok(content) => (quint_html::parse(&content), url.to_string()),
+                Err(e) => {
+                    eprintln!("error reading file '{}': {}", file_path, e);
+                    process::exit(1);
+                }
+            }
+        } else {
+            match quint_net::fetch(url) {
+                Ok(response) => (quint_html::parse(&response.body), response.final_url),
+                Err(e) => {
+                    eprintln!("error: {}", e);
+                    process::exit(1);
+                }
             }
         }
     };
 
-    // Extract and run JS
-    let js = extract_scripts(&dom);
-    if !js.trim().is_empty() {
-        if let Err(e) = quint_js::execute_script(&mut dom, &js) {
-            eprintln!("warning: JS execution failed: {}", e);
+    // Load external scripts if any
+    if !base_target.is_empty() {
+        for src in extract_script_srcs(&dom) {
+            match load_resource(&base_target, &src) {
+                Ok(code) => {
+                    if let Err(e) = quint_js::execute_script(&mut dom, &code) {
+                        eprintln!("warning: External JS execution failed ({}): {}", src, e);
+                    }
+                }
+                Err(e) => eprintln!("warning: {}", e),
+            }
         }
+    }
+
+    // Extract and run inline JS
+    let js = extract_scripts(&dom);
+    if !js.trim().is_empty()
+        && let Err(e) = quint_js::execute_script(&mut dom, &js)
+    {
+        eprintln!("warning: JS execution failed: {}", e);
     }
 
     if is_dom_only {
@@ -159,8 +260,22 @@ fn main() {
         process::exit(0);
     }
 
-    let mut css =
-        String::from("head, title, style, script, link, meta, noscript { display: none; }\n");
+    let mut css = String::from(quint_style::default_ua_css());
+    css.push('\n');
+
+    // Load external stylesheets if any
+    if !base_target.is_empty() {
+        for href in extract_linked_stylesheets(&dom) {
+            match load_resource(&base_target, &href) {
+                Ok(sheet_content) => {
+                    css.push_str(&sheet_content);
+                    css.push('\n');
+                }
+                Err(e) => eprintln!("warning: {}", e),
+            }
+        }
+    }
+
     css.push_str(&extract_styles(&dom));
     let stylesheet = quint_css::parse(&css);
     let styled_tree = quint_style::style_tree(&dom, &stylesheet, &PropertyMap::new());

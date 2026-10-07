@@ -1,4 +1,4 @@
-use crate::types::{Declaration, Rule, Selector, Stylesheet};
+use crate::types::{Combinator, Declaration, Rule, Selector, Stylesheet};
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -24,6 +24,11 @@ pub fn parse(input: &str) -> Stylesheet {
     }
 
     Stylesheet { rules }
+}
+
+pub fn parse_declarations_from_str(input: &str) -> Vec<Declaration> {
+    let mut chars = input.chars().peekable();
+    parse_declarations(&mut chars)
 }
 
 fn skip_whitespace_and_comments(chars: &mut Peekable<Chars>) {
@@ -138,7 +143,7 @@ fn parse_selectors(chars: &mut Peekable<Chars>) -> Vec<Selector> {
             _ => {}
         }
 
-        if let Some(sel) = parse_selector(chars) {
+        if let Some(sel) = parse_complex_selector(chars) {
             selectors.push(sel);
         }
 
@@ -150,6 +155,43 @@ fn parse_selectors(chars: &mut Peekable<Chars>) -> Vec<Selector> {
         }
     }
     selectors
+}
+
+fn parse_complex_selector(chars: &mut Peekable<Chars>) -> Option<Selector> {
+    let mut current = parse_selector(chars)?;
+
+    loop {
+        let mut had_whitespace = false;
+        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+            chars.next();
+            had_whitespace = true;
+        }
+
+        match chars.peek() {
+            Some(&',') | Some(&'{') | None => break,
+            Some(&'>') => {
+                chars.next(); // consume '>'
+                skip_whitespace_and_comments(chars);
+                if let Some(mut next_sel) = parse_selector(chars) {
+                    next_sel.relation = Some((Combinator::Child, Box::new(current)));
+                    current = next_sel;
+                } else {
+                    break;
+                }
+            }
+            Some(&c) if had_whitespace || c == '.' || c == '#' || c == ':' => {
+                if let Some(mut next_sel) = parse_selector(chars) {
+                    next_sel.relation = Some((Combinator::Descendant, Box::new(current)));
+                    current = next_sel;
+                } else {
+                    break;
+                }
+            }
+            _ => break,
+        }
+    }
+
+    Some(current)
 }
 
 fn parse_selector(chars: &mut Peekable<Chars>) -> Option<Selector> {

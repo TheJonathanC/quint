@@ -52,7 +52,12 @@ pub fn fetch(url: &str) -> Result<FetchResponse, FetchError> {
         ));
     }
 
-    let response = match ureq::get(url).call() {
+    let response = match ureq::get(url)
+        .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Quint/0.1.0")
+        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,text/css,*/*;q=0.8")
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .call()
+    {
         Ok(res) => res,
         Err(ureq::Error::StatusCode(code)) => {
             return Err(FetchError::HttpStatus {
@@ -79,12 +84,13 @@ pub fn fetch(url: &str) -> Result<FetchResponse, FetchError> {
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    let mut body = String::new();
+    let mut body_bytes = Vec::new();
     response
         .into_body()
         .into_reader()
         .take(MAX_BODY_SIZE)
-        .read_to_string(&mut body)?;
+        .read_to_end(&mut body_bytes)?;
+    let body = String::from_utf8_lossy(&body_bytes).into_owned();
 
     Ok(FetchResponse {
         final_url: url.to_string(),
@@ -94,9 +100,91 @@ pub fn fetch(url: &str) -> Result<FetchResponse, FetchError> {
     })
 }
 
+/// Resolves a relative or absolute URL against a base URL according to standard URL resolution rules.
+pub fn resolve_url(base: &str, relative: &str) -> String {
+    let rel_trimmed = relative.trim();
+    if rel_trimmed.starts_with("http://")
+        || rel_trimmed.starts_with("https://")
+        || rel_trimmed.starts_with("data:")
+        || rel_trimmed.starts_with("file://")
+    {
+        return rel_trimmed.to_string();
+    }
+
+    let (scheme, rest) = if let Some(idx) = base.find("://") {
+        (&base[..idx + 3], &base[idx + 3..])
+    } else {
+        ("https://", base)
+    };
+
+    // Protocol-relative URL: //example.com/foo
+    if rel_trimmed.starts_with("//") {
+        let s = scheme.split(':').next().unwrap_or("https");
+        return format!("{}:{}", s, rel_trimmed);
+    }
+
+    let host_and_path = rest;
+    let (host, path) = match host_and_path.find('/') {
+        Some(idx) => (&host_and_path[..idx], &host_and_path[idx..]),
+        None => (host_and_path, "/"),
+    };
+
+    // Root-relative URL: /foo/bar
+    if rel_trimmed.starts_with('/') {
+        return format!("{}{}{}", scheme, host, rel_trimmed);
+    }
+
+    // Path-relative URL: foo.css, ./foo.css, ../foo.css
+    let base_dir = match path.rfind('/') {
+        Some(idx) => &path[..=idx],
+        None => "/",
+    };
+
+    let mut parts: Vec<&str> = base_dir
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    for segment in rel_trimmed.split('/') {
+        if segment == "." || segment.is_empty() {
+            continue;
+        } else if segment == ".." {
+            parts.pop();
+        } else {
+            parts.push(segment);
+        }
+    }
+
+    format!("{}{}/{}", scheme, host, parts.join("/"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_resolve_url() {
+        assert_eq!(
+            resolve_url("https://example.com/path/index.html", "style.css"),
+            "https://example.com/path/style.css"
+        );
+        assert_eq!(
+            resolve_url("https://example.com/path/index.html", "/global.css"),
+            "https://example.com/global.css"
+        );
+        assert_eq!(
+            resolve_url("https://example.com/a/b/c", "../other.css"),
+            "https://example.com/a/other.css"
+        );
+        assert_eq!(
+            resolve_url("https://example.com", "//cdn.org/lib.js"),
+            "https://cdn.org/lib.js"
+        );
+        assert_eq!(
+            resolve_url("http://example.com/index.html", "https://other.com/a.css"),
+            "https://other.com/a.css"
+        );
+    }
 
     #[test]
     fn empty_url_is_invalid() {

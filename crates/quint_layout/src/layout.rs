@@ -36,10 +36,10 @@ pub fn parse_length(value: &str, container_dimension: f32) -> Option<f32> {
 }
 
 pub fn is_hidden(styled: &StyledNode) -> bool {
-    if let Some(display) = styled.properties.get("display") {
-        if display == "none" {
-            return true;
-        }
+    if let Some(display) = styled.properties.get("display")
+        && display == "none"
+    {
+        return true;
     }
     false
 }
@@ -139,7 +139,7 @@ pub fn layout_tree<'a>(
     taffy.compute_layout(root_node, Size::MAX_CONTENT).unwrap();
 
     let mut boxes = Vec::new();
-    let root_layout = taffy.layout(root_node).unwrap().clone();
+    let root_layout = *taffy.layout(root_node).unwrap();
     for (styled, node) in child_mapping {
         let b = build_layout_box(
             &taffy,
@@ -162,9 +162,11 @@ fn build_taffy_tree(
     viewport_width: f32,
     viewport_height: f32,
 ) -> taffy::prelude::Node {
-    let mut style = Style::default();
-    style.display = Display::Flex;
-    style.flex_direction = FlexDirection::Column;
+    let mut style = Style {
+        display: Display::Flex,
+        flex_direction: FlexDirection::Column,
+        ..Default::default()
+    };
 
     if let Some(disp) = styled.properties.get("display") {
         if disp == "flex" {
@@ -175,15 +177,62 @@ fn build_taffy_tree(
         }
     }
 
-    if let Some(w) = styled.properties.get("width") {
-        if let Some(px) = parse_length(w, viewport_width) {
-            style.size.width = Dimension::Points(px);
+    if let Some(fd) = styled.properties.get("flex-direction") {
+        match fd.as_str() {
+            "row" => style.flex_direction = FlexDirection::Row,
+            "column" => style.flex_direction = FlexDirection::Column,
+            "row-reverse" => style.flex_direction = FlexDirection::RowReverse,
+            "column-reverse" => style.flex_direction = FlexDirection::ColumnReverse,
+            _ => {}
         }
     }
-    if let Some(h) = styled.properties.get("height") {
-        if let Some(px) = parse_length(h, viewport_height) {
-            style.size.height = Dimension::Points(px);
+
+    if let Some(jc) = styled.properties.get("justify-content") {
+        match jc.as_str() {
+            "flex-start" | "start" => style.justify_content = Some(JustifyContent::FlexStart),
+            "flex-end" | "end" => style.justify_content = Some(JustifyContent::FlexEnd),
+            "center" => style.justify_content = Some(JustifyContent::Center),
+            "space-between" => style.justify_content = Some(JustifyContent::SpaceBetween),
+            "space-around" => style.justify_content = Some(JustifyContent::SpaceAround),
+            "space-evenly" => style.justify_content = Some(JustifyContent::SpaceEvenly),
+            _ => {}
         }
+    }
+
+    if let Some(ai) = styled.properties.get("align-items") {
+        match ai.as_str() {
+            "flex-start" | "start" => style.align_items = Some(AlignItems::FlexStart),
+            "flex-end" | "end" => style.align_items = Some(AlignItems::FlexEnd),
+            "center" => style.align_items = Some(AlignItems::Center),
+            "baseline" => style.align_items = Some(AlignItems::Baseline),
+            "stretch" => style.align_items = Some(AlignItems::Stretch),
+            _ => {}
+        }
+    }
+
+    if let Some(rg) = styled.properties.get("row-gap").and_then(|v| parse_length(v, viewport_height)) {
+        style.gap.height = LengthPercentage::Points(rg);
+    }
+    if let Some(cg) = styled.properties.get("column-gap").and_then(|v| parse_length(v, viewport_width)) {
+        style.gap.width = LengthPercentage::Points(cg);
+    }
+
+    if let Some(fg) = styled.properties.get("flex-grow").and_then(|v| v.trim().parse::<f32>().ok()) {
+        style.flex_grow = fg;
+    }
+    if let Some(fs) = styled.properties.get("flex-shrink").and_then(|v| v.trim().parse::<f32>().ok()) {
+        style.flex_shrink = fs;
+    }
+
+    if let Some(w) = styled.properties.get("width")
+        && let Some(px) = parse_length(w, viewport_width)
+    {
+        style.size.width = Dimension::Points(px);
+    }
+    if let Some(h) = styled.properties.get("height")
+        && let Some(px) = parse_length(h, viewport_height)
+    {
+        style.size.height = Dimension::Points(px);
     }
 
     let margin_left = get_shorthand_edge(&styled.properties, "margin", EdgeSide::Left);
@@ -213,7 +262,7 @@ fn build_taffy_tree(
         top: to_length(pad_top),
         bottom: to_length(pad_bottom),
     };
-    
+
     let border_left = get_shorthand_edge(&styled.properties, "border-width", EdgeSide::Left)
         .or_else(|| styled.properties.get("border-left-width").map(|s| s.as_str()))
         .and_then(|v| parse_length(v, viewport_width));
@@ -241,43 +290,46 @@ fn build_taffy_tree(
     }
 
     if let Node::Text(text) = &styled.node {
-        let text_clone = text.clone();
         let font_size = styled
             .properties
             .get("font-size")
-            .and_then(|s| parse_length(s, 16.0))
-            .unwrap_or(16.0);
+            .and_then(|v| parse_length(v, viewport_width))
+            .unwrap_or(16.0)
+            .max(4.0);
+
+        let font = get_font();
+        let scale = PxScale { x: font_size, y: font_size };
+        let v_metrics = font.as_scaled(scale).ascent() - font.as_scaled(scale).descent() + font.as_scaled(scale).line_gap();
+        let line_height = v_metrics * 1.2;
+        let space_width = font.as_scaled(scale).h_advance(font.glyph_id(' '));
+
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let mut word_widths: Vec<f32> = Vec::with_capacity(words.len());
+        for word in &words {
+            let mut w = 0.0;
+            let mut last_glyph = None;
+            for ch in word.chars() {
+                let glyph_id = font.glyph_id(ch);
+                w += font.as_scaled(scale).h_advance(glyph_id);
+                if let Some(last) = last_glyph {
+                    w += font.as_scaled(scale).kern(last, glyph_id);
+                }
+                last_glyph = Some(glyph_id);
+            }
+            word_widths.push(w);
+        }
 
         taffy.new_leaf_with_measure(style, taffy::node::MeasureFunc::Boxed(Box::new(move |_known, available| {
-            let font = get_font();
-            let scale = PxScale { x: font_size, y: font_size };
-            let v_metrics = font.as_scaled(scale).ascent() - font.as_scaled(scale).descent() + font.as_scaled(scale).line_gap();
-            let line_height = v_metrics * 1.2;
-            let space_width = font.as_scaled(scale).h_advance(font.glyph_id(' '));
-            
+            if word_widths.is_empty() {
+                return Size { width: 0.0, height: 0.0 };
+            }
+
             let max_w = available.width.unwrap_or(viewport_width);
-            
             let mut lines = 1;
             let mut cur_x = 0.0;
             let mut total_max_x = 0.0_f32;
 
-            let words: Vec<&str> = text_clone.split_whitespace().collect();
-            if words.is_empty() {
-                return Size { width: 0.0, height: 0.0 };
-            }
-
-            for (i, word) in words.iter().enumerate() {
-                let mut word_width = 0.0;
-                let mut last_glyph = None;
-                for ch in word.chars() {
-                    let glyph_id = font.glyph_id(ch);
-                    word_width += font.as_scaled(scale).h_advance(glyph_id);
-                    if let Some(last) = last_glyph {
-                        word_width += font.as_scaled(scale).kern(last, glyph_id);
-                    }
-                    last_glyph = Some(glyph_id);
-                }
-
+            for (i, &word_width) in word_widths.iter().enumerate() {
                 if cur_x > 0.0 && cur_x + word_width > max_w {
                     lines += 1;
                     cur_x = 0.0;
@@ -286,11 +338,11 @@ fn build_taffy_tree(
                 if cur_x > total_max_x {
                     total_max_x = cur_x;
                 }
-                if i + 1 < words.len() {
+                if i + 1 < word_widths.len() {
                     cur_x += space_width;
                 }
             }
-            
+
             Size {
                 width: total_max_x,
                 height: lines as f32 * line_height,
@@ -389,7 +441,6 @@ fn build_layout_box<'a>(
         top: margin_top,
         bottom: margin_bottom,
     };
-    
     let mut children = Vec::new();
     if let quint_html::Node::Element { .. } = styled.node {
         let taffy_children = taffy.children(node).unwrap();
@@ -408,10 +459,52 @@ fn build_layout_box<'a>(
             }
         }
     }
-    
+
     LayoutBox {
         dimensions,
         styled_node: styled,
         children,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quint_style::PropertyMap;
+
+    #[test]
+    fn test_layout_simple_tree() {
+        let mut props = PropertyMap::new();
+        props.insert("width".to_string(), "200px".to_string());
+        props.insert("height".to_string(), "100px".to_string());
+        let node = quint_html::Node::Element {
+            tag: "div".to_string(),
+            attributes: vec![],
+            children: vec![],
+        };
+        let styled = vec![StyledNode {
+            node: &node,
+            properties: props,
+            children: vec![],
+        }];
+        let boxes = layout_tree(&styled, 800.0);
+        assert_eq!(boxes.len(), 1);
+        assert_eq!(boxes[0].dimensions.content.width, 200.0);
+        assert_eq!(boxes[0].dimensions.content.height, 100.0);
+    }
+
+    #[test]
+    fn test_layout_text_scaling() {
+        let mut props = PropertyMap::new();
+        props.insert("font-size".to_string(), "32px".to_string());
+        let node = quint_html::Node::Text("Big Header Text".to_string());
+        let styled = vec![StyledNode {
+            node: &node,
+            properties: props,
+            children: vec![],
+        }];
+        let boxes = layout_tree(&styled, 800.0);
+        assert_eq!(boxes.len(), 1);
+        assert!(boxes[0].dimensions.content.height > 30.0);
     }
 }

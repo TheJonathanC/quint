@@ -1,8 +1,8 @@
 mod parser;
 mod types;
 
-pub use parser::parse;
-pub use types::{Declaration, Rule, Selector, Stylesheet};
+pub use parser::{parse, parse_declarations_from_str};
+pub use types::{Combinator, Declaration, Rule, Selector, Stylesheet};
 
 #[cfg(test)]
 mod tests {
@@ -69,6 +69,33 @@ mod tests {
     }
 
     #[test]
+    fn parse_descendant_selector() {
+        let ss = parse("div p { color: red; }");
+        assert_eq!(ss.rules.len(), 1);
+        let sel = &ss.rules[0].selectors[0];
+        assert_eq!(sel.tag, Some("p".to_string()));
+        assert!(sel.relation.is_some());
+        let (comb, prev) = sel.relation.as_ref().unwrap();
+        assert_eq!(*comb, Combinator::Descendant);
+        assert_eq!(prev.tag, Some("div".to_string()));
+        assert_eq!(sel.specificity(), (0, 0, 2));
+    }
+
+    #[test]
+    fn parse_child_selector() {
+        let ss = parse("ul > li.active { color: blue; }");
+        assert_eq!(ss.rules.len(), 1);
+        let sel = &ss.rules[0].selectors[0];
+        assert_eq!(sel.tag, Some("li".to_string()));
+        assert_eq!(sel.classes, vec!["active"]);
+        assert!(sel.relation.is_some());
+        let (comb, prev) = sel.relation.as_ref().unwrap();
+        assert_eq!(*comb, Combinator::Child);
+        assert_eq!(prev.tag, Some("ul".to_string()));
+        assert_eq!(sel.specificity(), (0, 1, 2));
+    }
+
+    #[test]
     fn parse_with_comments() {
         let ss = parse("/* header styles */ h1 { color: red; /* TODO: change */ }");
         assert_eq!(ss.rules.len(), 1);
@@ -94,6 +121,7 @@ mod tests {
             tag: Some("h1".into()),
             id: None,
             classes: vec![],
+            relation: None,
         };
         assert_eq!(s.specificity(), (0, 0, 1));
     }
@@ -104,6 +132,7 @@ mod tests {
             tag: None,
             id: None,
             classes: vec!["x".into()],
+            relation: None,
         };
         assert_eq!(s.specificity(), (0, 1, 0));
     }
@@ -114,6 +143,7 @@ mod tests {
             tag: None,
             id: Some("m".into()),
             classes: vec![],
+            relation: None,
         };
         assert_eq!(s.specificity(), (1, 0, 0));
     }
@@ -124,6 +154,7 @@ mod tests {
             tag: Some("div".into()),
             id: Some("x".into()),
             classes: vec!["a".into(), "b".into()],
+            relation: None,
         };
         assert_eq!(s.specificity(), (1, 2, 1));
     }

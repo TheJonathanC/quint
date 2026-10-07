@@ -51,10 +51,9 @@ pub fn render_window(layout_tree: Vec<LayoutBox>, initial_width: f32) {
                     event: WindowEvent::Resized(size),
                     ..
                 } => {
-                    if size.width > 0 && size.height > 0 {
-                        if let Some(surf) = &mut surface {
-                            render_cx.resize_surface(surf, size.width, size.height);
-                        }
+                    if size.width > 0 && size.height > 0
+                        && let Some(surf) = &mut surface {
+                        render_cx.resize_surface(surf, size.width, size.height);
                     }
                 }
                 Event::WindowEvent {
